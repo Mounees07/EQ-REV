@@ -1,0 +1,105 @@
+import pandas as pd
+import requests
+from datetime import datetime
+import time
+
+# === Step 1: Load Inputs (LIMITED to 2 products and 5 locations) ===
+df_products = pd.read_excel("products.xlsx").head(2)  # Get first 2 products
+df_locations = pd.read_excel("locations.xlsx").head(5)  # Get first 5 locations
+
+# === Step 2: Cartesian Join ===
+df_combined = df_products.merge(df_locations, how='cross')
+
+# === Step 3: Header Template ===
+headers_template = {
+    "user-agent": "Mozilla/5.0 (Linux; Android 13; Pixel 7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/135.0.0.0 Mobile Safari/537.36",
+    "x-build-version": "2.266.0",
+    "accept": "*/*",
+    "accept-language": "en-US,en;q=0.9",
+    "content-type": "application/json"
+}
+
+# === Step 4: Process Each Row ===
+all_data = []
+failed_requests = []
+
+for index, row in df_combined.iterrows():
+    product_id = row['Instamart_Product_ID']
+    store_id = row['store_id']
+    secondary_store_id = row.get('secondary_store_id', '')
+    pincode = row.get('pincode', '')
+
+    url = f"https://www.swiggy.com/api/instamart/item/{product_id}/widgets?storeId={store_id}&primaryStoreId={store_id}&secondaryStoreId={secondary_store_id}"
+
+    for attempt in range(3):  # Retry 3 times max
+        try:
+            response = requests.get(url, headers=headers_template, timeout=10)
+
+            if response.status_code == 200:
+                data = response.json()
+                item = data.get("data", {}).get("item", {})
+                variations = item.get("variations", [{}])[0]
+                price = variations.get("price", {})
+                inventory = variations.get("inventory", {})
+
+                product_data = {
+                    'scrape_date': datetime.today().strftime('%Y-%m-%d'),
+                    'insert_time': datetime.now().timestamp(),
+                    'input_product_id': product_id,
+                    'input_store_id': store_id,
+                    'input_Secondary_store_id': secondary_store_id,
+                    'input_pincode': pincode,
+                    'product_id': item.get('product_id', ''),
+                    'variation_id': variations.get('id', ''),
+                    'spin_id': variations.get('spin', ''),
+                    'brand_id': item.get('brand_id', ''),
+                    'brand_name': item.get('brand', ''),
+                    'product_name': item.get('display_name', ''),
+                    'pack_of': item.get('sku_quantity_with_combo', ''),
+                    'formatted_packsize': item.get('quantity', ''),
+                    'weight': item.get('weight_in_grams', ''),
+                    'mrp': price.get('mrp', ''),
+                    'discounted_selling_price': price.get('offer_price', ''),
+                    'discount_percent': price.get('offer_applied', {}).get('listing_description', ''),
+                    'in_stock': inventory.get('in_stock', ''),
+                    'available_quantity': inventory.get('total', ''),
+                    'max_allowed_quantity': item.get('max_allowed_quantity', ''),
+                    'category_id': item.get('category_id', ''),
+                    'category_name': item.get('category', ''),
+                    'subcategory_name': item.get('sub_category', ''),
+                    'Variant_Flag': item.get('listing_variant', ''),
+                    'scraped_store_id': item.get('store_id', '')
+                }
+
+                all_data.append(product_data)
+                print(f"✅ Success: {product_id} @ {store_id}")
+                break
+
+            elif response.status_code == 429:
+                print(f"⏳ Rate limited, retrying... ({attempt+1})")
+                time.sleep(2 ** attempt)
+
+            else:
+                raise Exception(f"Unexpected status code: {response.status_code}")
+
+        except Exception as e:
+            if attempt == 2:
+                failed_requests.append({
+                    'product_id': product_id,
+                    'store_id': store_id,
+                    'secondary_store_id': secondary_store_id,
+                    'pincode': pincode,
+                    
+                    'error': str(e)
+                })
+                print(f"❌ Failed: {product_id} @ {store_id} — {e}")
+            else:
+                time.sleep(1)
+
+# === Step 5: Save Outputs ===
+pd.DataFrame(all_data).to_excel("test_output_limited.xlsx", index=False)
+pd.DataFrame(failed_requests).to_excel("test_failed_limited.xlsx", index=False)
+
+print("\n🎯 LIMITED TEST COMPLETE")
+print(f"✅ Total Successful: {len(all_data)}")
+print(f"❌ Total Failed: {len(failed_requests)}")

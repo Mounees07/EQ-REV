@@ -1,0 +1,66 @@
+import requests
+import pandas as pd
+from datetime import datetime
+
+url = 'https://www.swiggy.com/api/instamart/item/P7M9WFVLNR/widgets?storeId=1386719&primaryStoreId=1386719&secondaryStoreId='
+headers = {
+    'accept': '/',
+    'accept-language': 'en-US,en;q=0.9',
+    'content-type': 'application/json',
+    'user-agent': 'Mozilla/5.0',
+    'x-build-version': '2.266.0',
+}
+
+try:
+    response = requests.get(url, headers=headers, timeout=10)
+    response.raise_for_status()
+    data = response.json()
+except requests.RequestException as e:
+    print(f"Request failed: {e}")
+    data = {}
+
+if data:
+    item = data.get('data', {}).get('item', {})
+    variation = item.get('variations', [{}])[0]  # Get first variation safely
+
+    scrape_date = datetime.today().strftime('%Y-%m-%d')
+    insert_time = datetime.now().timestamp()
+
+    product_data = {
+        'scrape_date': scrape_date,
+        'insert_time': insert_time,
+        'product_id': item.get('product_id', ''),
+        'variation_id': variation.get('id', ''),
+        'spin_id': variation.get('spin', ''),
+        'brand_name': item.get('brand', ''),
+        'brand_id': variation.get('brand_id', ''),
+        'product_name': variation.get('display_name', ''),
+        'pack_of': variation.get('quantity', ''),
+        'formatted_packsize': variation.get('sku_quantity_with_combo', ''),
+        'weight': variation.get('weight_in_grams', ''),
+        'mrp': variation.get('price', {}).get('mrp', ''),
+        'discounted_selling_price': variation.get('price', {}).get('offer_price', ''),
+        'discount_percent': variation.get('price', {}).get('offer_applied', {}).get('product_description', ''),
+        'in_stock': variation.get('inventory', {}).get('in_stock', ''),
+        'available_quantity': variation.get('inventory', {}).get('total', ''),
+        'max_allowed_quantity': variation.get('max_allowed_quantity', ''),
+        'category_id': variation.get('category_id', ''),
+        'category_name': variation.get('category', ''),
+        'subcategory_name': variation.get('sub_category', ''),
+        'supercategory_name': variation.get('super_category', ''),
+        'group_id': variation.get('meta', {}).get('group', ''),
+        'Variant_Flag': variation.get('displayVariant', ''),
+        'scraped_store_id': variation.get('store_id', '')
+    }
+
+    
+    print("Extracted Product Data:")
+    for key, val in product_data.items():
+        print(f"{key}: {val}")
+
+    # Save to Excel
+    df = pd.DataFrame([product_data])
+    df.to_excel("instamart_product_data.xlsx", index=False)
+
+else:
+    print("No data to process.")
